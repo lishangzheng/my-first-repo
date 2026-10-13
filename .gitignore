@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 系统
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 数据/模型（这类东西不该进 git）
+*.7z
+*.zip
+data/
+models/
+*.wav
+*.mp3
+
+# 环境变量
+.env
