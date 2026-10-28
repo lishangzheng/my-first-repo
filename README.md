@@ -2,8 +2,9 @@
 <!-- markdownlint-disable html -->
 
 <div align="center">
+  <img src="assets/logo.svg" width="96" height="96" alt="Multi-Model Bridge">
   <h1>Multi-Model Bridge</h1>
-  <p><b>五个本机已登录的对话模型，一个可编程的本地服务</b></p>
+  <p><b>Five locally authenticated models. One programmable local service.</b></p>
   <p>千问 · DeepSeek · Kimi · MiniMax Code · 智谱清言</p>
   <p>
     <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white">
@@ -32,7 +33,7 @@
 
 ## 1. 简介
 
-本项目将本机已登录的五个对话式模型统一为一个可编程的本地服务。实现基于 **Chrome DevTools Protocol（CDP）**，直接驱动真实的浏览器会话，不依赖模型厂商的 API，不保存账号凭据，也不修改用户日常使用的浏览器配置。
+本项目提出一种不依赖 API Key 的多模型接入方式：以 **Chrome DevTools Protocol（CDP）** 驱动本机已登录的五个对话式模型，将它们统一为一个可编程的本地服务。系统不保存账号凭据，也不修改用户日常使用的浏览器配置。当前实现覆盖 5 个模型、2 个调试端口（9222 / 9223），Node.js 侧零第三方依赖。
 
 与需要 API Key 的聚合网关不同，本项目复用用户已经建立的登录态。CDP 只负责四件事：定位输入框、写入问题、触发发送、读取答案。请求仍发生在模型厂商自己的网页或客户端内，调试端口只监听 `127.0.0.1`。
 
