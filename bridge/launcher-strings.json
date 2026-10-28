@@ -2,7 +2,7 @@
   "tagOk": "[OK]",
   "tagNote": "[注意]",
   "tagBad": "[失败]",
-  "windowTitle": "多模型桥接启动器（千问 + DeepSeek + Kimi 网页版）",
+  "windowTitle": "多模型桥接启动器（千问 + DeepSeek + Kimi + MiniMax + 智谱）",
   "windowSubtitle": "用途：让 Harness 能同时问千问、DeepSeek、Kimi、MiniMax、智谱做交叉校对",
   "step1": "第 1 步 / 共 3 步：DeepSeek 网页版",
   "step2": "第 2 步 / 共 3 步：千问客户端",
