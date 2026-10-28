@@ -250,6 +250,20 @@ bridge/
 - 如果你 fork 这个项目：不要把本地路径、账号昵称、cookie、token 提交进仓库。
   `.gitignore` 已挡住 `.env`、`*.local.*`、日志与交叉校对留档。
 
+### 需要按机器改的地方（脚本里都标了 `FILL IN`）
+
+| 文件 | 这里填什么 |
+| --- | --- |
+| `bridge/start-browser.ps1` | Chrome 的安装路径（默认 `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`） |
+| `bridge/make-desktop-shortcut.ps1` | 同上，只用于快捷方式图标 |
+| `bridge/start-qwen-debug.ps1` | 千问客户端 `qianwen.exe` 的路径 |
+| `bridge/qwen-debug-restart.ps1` | 千问 exe 与 `User Data` 目录 |
+| `bridge/qwen-debug-force.ps1` | 同上 |
+
+> `.ps1` 里的注释用英文 `FILL IN`，是因为这些脚本必须保持纯 ASCII
+> （Windows PowerShell 5.1 会把无 BOM 的 `.ps1` 当 ANSI 读，中文会乱码）。
+> 密码、手机号、账号、密钥**不需要填**，桥接只用浏览器里已登录的会话。
+
 ---
 
 ## 已知限制
