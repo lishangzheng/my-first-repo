@@ -7,21 +7,16 @@
 // first whenever a run reports WEB_EMPTY_REPLY, WEB_NO_PROGRESS or NEED_LOGIN.
 
 import { connect, evaluate, listTargets } from './cdp.mjs';
-import { site } from './sites.mjs';
-
-const PAGE = {
-  deepseek: { composer: 'textarea[placeholder]', answers: 'div.ds-markdown' },
-  qwen: { composer: '[role=textbox][contenteditable=true]', answers: 'div.qk-markdown' },
-};
+import { page as pageContract, SITES, site } from './sites.mjs';
 
 const key = process.argv[2];
-if (!key || !PAGE[key]) {
-  process.stderr.write('usage: inspect-site.mjs <deepseek|qwen>\n');
+if (!key || !SITES[key]) {
+  process.stderr.write('usage: inspect-site.mjs <' + Object.keys(SITES).join('|') + '>\n');
   process.exit(2);
 }
 
 const s = site(key);
-const page = PAGE[key];
+const page = pageContract(key);
 
 let tabs;
 try {
@@ -66,7 +61,7 @@ try {
   console.log('answer blocks  : count=' + blocks.count + '  last-6 lengths=' + JSON.stringify(blocks.lens));
   console.log('last block text:', JSON.stringify(blocks.lastText));
 
-  const loggedOut = await evaluate(session, `(() => {
+  const loggedOut = await evaluate(session, page.loggedOut || `(() => {
     const t = document.body.innerText;
     return /发送验证码|扫码登录|密码登录/.test(t) && !document.querySelector(${JSON.stringify(page.composer)});
   })()`);

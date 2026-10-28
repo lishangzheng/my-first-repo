@@ -10,6 +10,7 @@
 # User Data, so the login survives.
 $ErrorActionPreference = 'Continue'
 
+# FILL IN: set these to your local Qianwen paths if they are not under %LOCALAPPDATA%.
 $exe = "$env:LOCALAPPDATA\Programs\QianwenApp\qianwen.exe"
 $userData = "$env:LOCALAPPDATA\Qianwen\User Data"
 $portFile = Join-Path $userData 'DevToolsActivePort'

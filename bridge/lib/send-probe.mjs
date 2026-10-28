@@ -8,7 +8,7 @@
 import { connect, evaluate, listTargets, sleep } from './cdp.mjs';
 import { MEASURE_INSTALL } from './answer-diff.mjs';
 import { activate, clickSend, focusComposer, forceVisible, pressKey, typeInto } from './drive.mjs';
-import { site } from './sites.mjs';
+import { page as pageContract, site } from './sites.mjs';
 
 const argv = process.argv.slice(2);
 const key = argv[0];
@@ -18,12 +18,8 @@ const seconds = secIdx >= 0 ? Number(argv[secIdx + 1]) : 90;
 const useClick = argv.includes('--click');
 if (!key || !prompt) { process.stderr.write('usage: send-probe.mjs <site> "<q>" [--seconds n] [--click]\n'); process.exit(2); }
 
-const PAGE = {
-  deepseek: { composer: 'textarea[placeholder]', send: 'div[role=button][class*="ds-button--circle"]', submit: 'enter' },
-  qwen: { composer: '[role=textbox][contenteditable=true]', send: 'button[aria-label="发送消息"], button[aria-label*="发送"]', submit: 'click' },
-};
 const s = site(key);
-const page = PAGE[key];
+const page = pageContract(key);
 const tab = (await listTargets(`127.0.0.1:${s.port}`)).find(s.match);
 const session = await connect(tab);
 

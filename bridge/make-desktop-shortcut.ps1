@@ -1,4 +1,4 @@
-﻿# Create the desktop shortcut for the two-model bridge launcher.
+# Create the desktop shortcut for the multi-model bridge launcher.
 #
 # The .bat itself keeps an ASCII name (cmd mangles CJK paths), so the Chinese,
 # self-explanatory name lives here on the shortcut, which is what the user
@@ -22,6 +22,7 @@ $linkPath = Join-Path $desktop ($S.shortcutName + '.lnk')
 # Icon: prefer the bridge browser's own icon, fall back to a generic console.
 $icon = $null
 foreach ($candidate in @(
+  # FILL IN: set this to your local Chrome path if it is not under %LOCALAPPDATA%.
   "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
   'C:\Program Files\Google\Chrome\Application\chrome.exe',
   'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe'

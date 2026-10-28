@@ -4,6 +4,7 @@
 # the app's own User Data dir and is reused.
 $ErrorActionPreference = 'Continue'
 
+# FILL IN: set this to your Qianwen install path if it is not under %LOCALAPPDATA%.
 $exe = "$env:LOCALAPPDATA\Programs\QianwenApp\qianwen.exe"
 if (-not (Test-Path $exe)) { "Qianwen client not found at $exe"; exit 1 }
 

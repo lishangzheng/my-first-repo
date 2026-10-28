@@ -2,6 +2,7 @@
 //
 //   node lib/ask.mjs deepseek "question text" [--timeout 180] [--json]
 //   node lib/ask.mjs qwen "question text"
+//   node lib/ask.mjs kimi "question text" [--new-chat]
 //
 // Prints the site's raw answer as JSON on stdout. Exit code 0 means an answer
 // was really read back from the page; non-zero means it was not, with a coded
@@ -20,87 +21,24 @@
 import { connect, evaluate, sleep } from './cdp.mjs';
 import {
   activate, clickComposer, clickSend, findTab, focusComposer, forceVisible,
-  insertTextViaEditor, isStreaming, listTabs, pressKey, typeByKeys, typeInto,
+  insertTextViaEditor, isStreaming, listTabs, pressEnter, pressKey, typeByKeys, typeInto,
 } from './drive.mjs';
-import { site } from './sites.mjs';
+import { page as pageContract, site } from './sites.mjs';
+// Reading "which block is the answer" now lives in answer.mjs: ask.mjs and the
+// recovery tool (read-last.mjs) must agree on it, so there is one owner.
+import { lastAnswerExpr } from './answer.mjs';
+// The "is it settled?" decision is a pure function so it can be table-tested
+// without a browser (lib/wait-policy.test.mjs). Qianwen's review asked for exactly
+// this: prove the quiet/stale semantics on synthetic timelines, not by one run.
+import { initialWaitState, nextWait } from './wait-policy.mjs';
 
-// Per-site page contract, established by live DOM probes (lib/dump-dom.mjs).
-const PAGE = {
-  deepseek: {
-    composer: 'textarea[placeholder]',
-    send: 'div[role=button][class*="ds-button--circle"]',
-    answers: 'div.ds-markdown',
-    streaming: ['button[aria-label*="停止"]', 'button[aria-label*="Stop"]', '[class*="stop-generat"]'],
-    submit: 'enter',
-    // A plain textarea: focus() plus insertText is enough.
-    composerFocus: 'focus',
-  },
-  qwen: {
-    composer: '[role=textbox][contenteditable=true]',
-    // aria-label is the only reliable handle here. A class-based guess
-    // (button[class*="size-9"]) matched 21 buttons and clicked the FIRST one --
-    // "添加附件" -- so the click reported success while nothing was ever sent.
-    // Verified on the live composer: the real control is
-    //   <button aria-label="发送消息" class="inline-flex size-8 ...">.
-    send: 'button[aria-label="发送消息"], button[aria-label*="发送"]',
-    // Scoped to the answer container on purpose: a bare `div.qk-markdown` also
-    // matches chat.qianwen.com's THINKING process (div.thinking-content-*) and
-    // empty placeholders, which produced a thinking block as the "answer".
-    answers: 'div.answer-common-card div.qk-markdown',
-    streaming: ['button[aria-label*="停止"]', 'button[aria-label*="Stop"]', '[class*="generating"]'],
-    // Click, not Enter: Enter alone did not submit in a controlled test.
-    submit: 'click',
-    // Slate editor: focus() does not move document.activeElement into it, so the
-    // prompt never lands. It needs a real mouse click.
-    composerFocus: 'click',
-  },
-};
-
-// Read the LAST non-empty answer block, in DOM order.
-//
-// This is the reliable baseline for "which reply is new": both sites render
-// messages chronologically, so the last non-empty answer before the send is the
-// previous turn's reply, and the answer to the new prompt is whatever replaces
-// it afterwards. Two earlier attempts at positional/anchored detection failed
-// on the live pages and are recorded here so nobody retries them:
-//   * "the last block" is empty: chat.qianwen.com appends an empty placeholder.
-//   * anchoring on the prompt's LAST occurrence excluded the real answer, which
-//     sits earlier in the body (measured: prompt at 47405, answer at 32108).
-//   * scoring by proximity then returned the previous turn's long answer.
-// Counting blocks is also unusable: the list is virtualised and re-renders.
-//
-// scrollBottom matters for the same reason. chat.qianwen.com virtualises the
-// message list: off-screen answer cards exist in the DOM with height 0 and NO
-// text at all (measured: 18 cards, the last one w=800 h=0 innerText=0). Reading
-// without pinning the view to the newest message therefore reads nothing, so
-// every read scrolls the conversation to the bottom first.
-function lastAnswerExpr(answerSelector, { scrollBottom = false } = {}) {
-  return `(() => {
-    const norm = (s) => s.replace(/\\s+/g, ' ').trim();
-    ${scrollBottom ? `
-    try {
-      const scrollers = [...document.querySelectorAll('*')].filter((el) => {
-        if (el.scrollHeight - el.clientHeight < 200) return false;
-        const oy = getComputedStyle(el).overflowY;
-        return oy === 'auto' || oy === 'scroll';
-      });
-      for (const el of scrollers) el.scrollTop = el.scrollHeight;
-      window.scrollTo(0, document.body.scrollHeight);
-    } catch (e) { /* scrolling is best effort */ }` : ''}
-    const nodes = document.querySelectorAll(${JSON.stringify(answerSelector)});
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      const cls = String(nodes[i].className || '') + ' ' + String(nodes[i].parentElement?.className || '');
-      if (/think|reason|chain/i.test(cls)) continue;
-      const t = norm(nodes[i].innerText || '');
-      if (t) return t;
-    }
-    return '';
-  })()`;
-}
 
 function parseArgs(argv) {
   const positional = [];
-  const flags = { timeout: 180, json: false, newChat: false };
+  // timeout stays null unless the caller forces one: each site declares its own
+  // budget in sites.mjs, because one number cannot fit both a 6-second answer
+  // and a model that thinks for minutes.
+  const flags = { timeout: null, json: false, newChat: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--timeout') flags.timeout = Number(argv[++i]);
@@ -115,12 +53,21 @@ const { positional, flags } = parseArgs(process.argv.slice(2));
 const [siteKey, prompt] = positional;
 
 if (!siteKey || !prompt) {
-  process.stderr.write('usage: ask.mjs <deepseek|qwen> "<question>" [--timeout 180]\n');
+  process.stderr.write('usage: ask.mjs <deepseek|qwen|kimi> "<question>" [--timeout <sec>] [--new-chat]\n');
+  process.stderr.write('       --timeout defaults to the site budget declared in sites.mjs (kimi is the patient one)\n');
   process.exit(2);
 }
 
 const s = site(siteKey);
-const page = PAGE[siteKey];
+// The page contract lives in sites.mjs; asking for it here fails loudly for a
+// site that was only half added.
+const page = pageContract(siteKey);
+
+// Wait budget: --timeout wins when given, otherwise the site's own default.
+// Kimi is deliberately patient (its reasoning is slow); the short models keep a
+// short budget so a real failure is still reported quickly.
+const DEFAULT_TIMEOUT_SEC = 180;
+const budgetSec = flags.timeout ?? s.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
 const started = Date.now();
 const result = {
   site: s.key,
@@ -130,6 +77,7 @@ const result = {
   answerChars: 0,
   elapsedMs: 0,
   acceptedSend: false,
+  timeoutSec: budgetSec,
   error: null,
 };
 
@@ -157,19 +105,32 @@ try {
   result.visibility = await forceVisible(session);
 
   // Guard: a visible login form means the session is gone; say so loudly.
-  const loggedOut = await evaluate(session, `(() => {
+  // 这里不需要填账号密码：桥接只检测登录页，绝不代填任何凭据。
+  //
+  // A site that keeps its composer while logged out (Kimi does: the whole web
+  // app renders, only the account button says 登录) supplies its own expression,
+  // because the generic "login form and no composer" test can never fire there.
+  const loggedOutExpr = page.loggedOut
+    ? page.loggedOut
+    : `(() => {
     const t = document.body.innerText;
     return /发送验证码|扫码登录|密码登录/.test(t) && !document.querySelector(${JSON.stringify(page.composer)});
-  })()`);
+  })()`;
+  const loggedOut = await evaluate(session, loggedOutExpr);
   if (loggedOut) fail('NEED_LOGIN', 'the page shows a login form instead of the chat composer');
 
   if (flags.newChat) {
-    await evaluate(session, `(() => {
+    // A site with a stable handle for "new chat" uses it; the rest fall back to
+    // matching the button's label.
+    const newChatExpr = page.newChat
+      ? `(() => { const b = document.querySelector(${JSON.stringify(page.newChat)}); if (!b) return false; b.click(); return true; })()`
+      : `(() => {
       const btn = [...document.querySelectorAll('div[role=button],button')]
-        .find((b) => /开启新对话|新建对话|新对话/.test(b.innerText || ''));
+        .find((b) => /开启新对话|新建对话|新对话|新建任务/.test(b.innerText || ''));
       if (btn) btn.click();
       return !!btn;
-    })()`);
+    })()`;
+    result.newChatClicked = await evaluate(session, newChatExpr);
     await sleep(1200);
   }
 
@@ -221,7 +182,8 @@ try {
   }
 
   if (page.submit === 'enter') {
-    await pressKey(session, 'Enter', 'Enter', 13);
+    // Full key sequence (keyDown + char + keyUp): chatglm.cn ignores keydown alone.
+    await pressEnter(session);
   } else {
     const clicked = await clickSend(session, page.send);
     if (!clicked) await pressKey(session, 'Enter', 'Enter', 13);
@@ -240,39 +202,92 @@ try {
     fail('SEND_REJECTED', 'composer still holds the prompt after Enter/click; the site did not accept the send');
   }
 
-  // Poll for the answer. findAnswerExpr anchors on the prompt inside the page,
-  // so a virtualised list, an appending empty placeholder, or an older reply
   // Poll for the answer. The reply is whatever replaces the last non-empty
   // answer text that was on screen before the send; an unchanged read means
   // "not yet", never "answered with the previous turn's text".
-  const deadline = started + flags.timeout * 1000;
+  //
+  // MONOTONIC clock on purpose: Date.now() jumps across sleep/wake, and a
+  // suspend mid-wait would look like a 30-minute "quiet" period and trip the
+  // stale cap. performance.now() only moves forward. (Qianwen's review flagged
+  // exactly this; it is the kind of bug that only appears after a coffee break.)
+  const mono = () => performance.now();
+  const startedMono = mono();
+  const deadlineMono = startedMono + budgetSec * 1000;
   const answerExpr = lastAnswerExpr(page.answers, { scrollBottom: true });
 
-  let best = '';
-  let stableSince = 0;
-  let changed = false;
-  const quietMs = 2500;
+  // How long the text must stay byte-identical before the answer counts as
+  // finished, and a hard cap for pages that keep claiming "still generating".
+  // Kimi thinks for a long time and pauses mid-answer, so it declares a much
+  // wider window than the two fast models (sites.mjs).
+  const quietMs = page.quietMs ?? 2500;
+  const staleBreakMs = page.staleBreakMs ?? quietMs * 4;
 
-  while (Date.now() < deadline) {
-    const text = await evaluate(session, answerExpr);
-    if (text && text !== baselineAnswer) {
-      changed = true;
-      if (text === best) {
-        if (!stableSince) stableSince = Date.now();
-        const streaming = await isStreaming(session, page.streaming);
-        if (!streaming && Date.now() - stableSince >= quietMs) break;
-      } else {
-        best = text;
-        stableSince = 0;
+  let waitState = initialWaitState();
+  let endReason = 'budget';
+  let lastGenerating = false;
+
+  // Progress goes to stderr so stdout stays pure JSON. Without this a slow model
+  // looks like a hang, which is exactly what tempts a caller into re-sending the
+  // question (duplicating it in the user's history).
+  let lastBeat = mono();
+
+  while (mono() < deadlineMono) {
+    // A site can refuse the turn outright: Kimi answers an over-quota or
+    // peak-hour request by navigating to its membership page and keeping the
+    // prompt in the composer. Checking here turns a silent wait (up to the full
+    // 420s budget) into an immediate, coded failure that names the real cause.
+    if (page.blocker) {
+      const blocked = await evaluate(session, page.blocker);
+      if (blocked) {
+        const code = String(blocked).split(':')[0].trim();
+        const detail = String(blocked).slice(String(blocked).indexOf(':') + 1).trim();
+        fail(code, detail);
       }
     }
+
+    if (mono() - lastBeat > 15000) {
+      lastBeat = mono();
+      const waited = Math.round((mono() - startedMono) / 1000);
+      process.stderr.write('[' + s.key + '] waiting ' + waited + 's/' + budgetSec + 's'
+        + ' (answer so far: ' + waitState.best.length + ' chars, generating: ' + lastGenerating + ')\n');
+    }
+
+    const text = await evaluate(session, answerExpr);
+    // Only pay for the "still generating" probe when the text has settled; that
+    // is the only moment the answer depends on it.
+    if (text && text === waitState.best) {
+      lastGenerating = await isStreaming(session, page.streaming);
+    }
+
+    const decision = nextWait(waitState, {
+      now: mono(),
+      text,
+      generating: lastGenerating,
+      baseline: baselineAnswer,
+      quietMs,
+      staleBreakMs,
+    });
+    waitState = decision.state;
+    if (decision.action === 'done') { endReason = decision.reason; break; }
+
     await sleep(800);
   }
 
-  if (!changed || !best.trim()) {
+  const best = waitState.best;
+  result.endReason = endReason;
+  // A budget ending means the text we have may be half-written; say so instead of
+  // returning it as a complete answer. (Qianwen's review P1-1: only 'did it
+  // finish' counts, not 'did text appear'.)
+  result.truncated = endReason === 'budget';
+  result.staleCut = endReason === 'stale';
+
+  if (!best.trim()) {
+    // The message must point at the recovery path, not invite a re-send: a
+    // re-send duplicates the question in the user's history.
     fail('WEB_NO_PROGRESS',
-      `the answer text never changed from the pre-send state within ${flags.timeout}s`
-      + (baselineAnswer ? ` (last pre-send answer was ${baselineAnswer.length} chars)` : ''));
+      `no new answer text within ${budgetSec}s`
+      + (baselineAnswer ? ` (last pre-send answer was ${baselineAnswer.length} chars)` : '')
+      + `; read the page again with read-last.mjs ${s.key} before re-sending`);
   }
 
   // The read can pick up trailing UI furniture that shares the answer container
@@ -285,6 +300,14 @@ try {
   let cleaned = best.trim();
   for (const tail of UI_TAILS) {
     if (cleaned.endsWith(tail)) cleaned = cleaned.slice(0, -tail.length).trim();
+  }
+
+  // A queue/overload notice is not an answer. Length matters: a real reply can
+  // legitimately QUOTE these phrases (e.g. explaining HTTP 429), so only a short
+  // reply is treated as the notice itself.
+  if (page.busyPattern && cleaned.length < 200 && new RegExp(page.busyPattern).test(cleaned)) {
+    fail('BUSY_QUEUE', 'the site replied with a queue/overload notice instead of an answer: '
+      + cleaned.slice(0, 80));
   }
 
   // A reply identical to the previous turn's is legitimate (repeated question),

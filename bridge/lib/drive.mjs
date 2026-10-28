@@ -4,10 +4,21 @@
 
 import { connect, evaluate, listTargets, sleep } from './cdp.mjs';
 
-/** Find the conversation tab for a site, or undefined. */
+/**
+ * Find the conversation tab for a site, or undefined.
+ *
+ * A site may keep several tabs on one endpoint (Kimi has both a landing page and
+ * /chat/<id> open in the shared browser). An optional `rank` on the site entry
+ * orders the matches so the real conversation wins over the landing page --
+ * otherwise the tab the driver picks would depend on Chrome's internal order.
+ */
 export async function findTab(s) {
   const targets = await listTargets(`127.0.0.1:${s.port}`);
-  return targets.find(s.match);
+  const matches = targets.filter(s.match);
+  if (matches.length > 1 && typeof s.rank === 'function') {
+    matches.sort((a, b) => s.rank(a) - s.rank(b));
+  }
+  return matches[0];
 }
 
 /** List every tab the bridge browser exposes, for diagnostics. */
@@ -173,6 +184,21 @@ export async function clickSend(session, sendSelector) {
     el.click();
     return true;
   })()`);
+}
+
+/**
+ * Press Enter exactly as a keyboard does: keyDown, then char, then keyUp.
+ *
+ * chatglm.cn needs all three: keyDown+keyUp alone did nothing, while the full
+ * sequence submitted the message. Sites that only look at keydown or keyup are
+ * unaffected by the extra char event.
+ */
+export async function pressEnter(session) {
+  const base = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  await session.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base });
+  await session.send('Input.dispatchKeyEvent', { type: 'char', text: '\r', ...base });
+  await session.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+  await sleep(150);
 }
 
 /** Press a real key via CDP (works even when no element reports focus). */

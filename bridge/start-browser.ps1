@@ -3,6 +3,7 @@
 # everyday Chrome profile.
 $ErrorActionPreference = 'Continue'
 
+# FILL IN: set this to your local Chrome path if it is not under %LOCALAPPDATA%.
 $chrome = "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path $chrome)) { $chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe' }
 if (-not (Test-Path $chrome)) { $chrome = 'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe' }

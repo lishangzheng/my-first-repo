@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wait-fixture</title>
+<style>body{font:16px sans-serif;padding:24px}#gen{color:#c00}</style>
+<h1>wait-fixture</h1>
+<p>答案区（驱动读这里）：</p>
+<div id="answer" style="white-space:pre-wrap;border:1px solid #ccc;padding:12px;min-height:40px"></div>
+<p>生成中标志（有文字 = 仍在生成）：</p>
+<div id="gen"></div>
+<script>
+// A page that plays one scripted answer timeline, chosen by ?scenario=.
+// Times are deliberately short (seconds, not minutes) so a probe can watch
+// every branch end; the probe passes matching quiet/stale/budget values.
+const q = new URLSearchParams(location.search);
+const scenario = q.get("scenario") || "earlystop";
+const A = document.getElementById("answer");
+const G = document.getElementById("gen");
+function set(text, generating) {
+  A.textContent = text;
+  G.textContent = generating ? "正在生成..." : "";
+}
+set("", false);
+if (scenario === "earlystop") {
+  setTimeout(() => set("done text", false), 300);
+} else if (scenario === "slowstart") {
+  // 6s of silence, then 4s of streaming, then settled: a naive driver would
+  // give up before anything appears.
+  setTimeout(() => {
+    let n = 1;
+    set("a", true);
+    const iv = setInterval(() => {
+      n += 1;
+      set("a".repeat(n * 20), true);
+      if (n >= 10) { clearInterval(iv); set("a".repeat(200), false); }
+    }, 400);
+  }, 6000);
+} else if (scenario === "stuckflag") {
+  // Text lands once, the indicator never clears: only the stale cap may end it.
+  setTimeout(() => set("frozen", true), 300);
+} else if (scenario === "longpause") {
+  // Partial text, long internal pause, still generating.
+  setTimeout(() => set("partial answer", true), 300);
+} else if (scenario === "rerender") {
+  // Same-ish length, content changes every tick: must never read as settled.
+  let i = 0;
+  set("v0", true);
+  setInterval(() => { i += 1; set("v" + (i % 2) + "x".repeat(20), true); }, 300);
+}
+</script>
